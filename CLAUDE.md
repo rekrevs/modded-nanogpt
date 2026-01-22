@@ -41,6 +41,16 @@ docker login registry.ice.ri.se
 ./ice/build-image.sh [tag]
 ```
 
+### Persistent Data Storage
+
+FineWeb data (~20GB) is stored in a PersistentVolumeClaim to avoid re-downloading:
+
+- **PVC**: `nanogpt-data` (50Gi, rook-ceph-rbd)
+- **Mount point**: `/data` in training pods
+- **Data location**: `/data/data/fineweb10B/`
+
+The PVC is automatically created by `train.sh` if it doesn't exist.
+
 ### Running Training
 
 ```bash
@@ -56,11 +66,11 @@ Inside the pod:
 # Sync code
 kubectl cp . aic/train-speedrun:/workspace/modded-nanogpt
 
-# Download data (103 chunks for full training, or pass smaller number for testing)
-cd /workspace/modded-nanogpt/data && python cached_fineweb10B.py [num_chunks]
+# Download data (only needed once - persists in PVC)
+cd /workspace/modded-nanogpt/data && DATA_PATH=/data python cached_fineweb10B.py
 
-# Run training
-cd /workspace/modded-nanogpt && ./run.sh
+# Run training with persistent data
+cd /workspace/modded-nanogpt && DATA_PATH=/data ./run.sh
 ```
 
 ### Key Files
@@ -71,10 +81,31 @@ cd /workspace/modded-nanogpt && ./run.sh
 | `ice/build-on-ice.sh` | Build image using Kaniko on ICE |
 | `ice/build-image.sh` | Build image locally with Docker |
 | `ice/train.sh` | Launch training pods |
+| `ice/nanogpt-data-pvc.yaml` | PVC for persistent FineWeb data |
 | `train_gpt.py` | Main training script (8 GPU) |
 | `train_gpt_single.py` | Single-GPU test version |
 | `run.sh` | Training launcher (8 GPU) |
 | `run_single_gpu.sh` | Single-GPU launcher |
+
+## Local Inference (MPS/CPU)
+
+Run the trained model locally on Apple Silicon or CPU:
+
+```bash
+# Extract weights from checkpoint (if needed)
+python extract_weights.py checkpoints/state_step001600.pt
+
+# Generate text
+python inference.py --prompt "Your prompt here" --max_tokens 100 --device mps
+```
+
+**Note:** Model was trained for perplexity benchmarking, not generation quality.
+
+| File | Purpose |
+|------|---------|
+| `inference.py` | Inference with SDPA (replaces Flash Attention 3) |
+| `extract_weights.py` | Extract model weights from training checkpoint |
+| `debug_inference.py` | Debugging utilities |
 
 ## Dependencies
 
@@ -88,7 +119,11 @@ Full training (8xH100):
 - 1600 iterations
 - Batch size schedule: 131K → 262K → 393K tokens
 - Target: ≤3.28 validation loss
-- Time: ~100 seconds
+- Time: ~100 seconds (ideal), ~220 seconds on ICE
+
+**Achieved results on ICE:**
+- val_loss: **3.2761** ✓ (target: ≤3.28)
+- Training time: 222 seconds (slower due to network vs NVLink)
 
 Single-GPU test (`train_gpt_single.py`):
 - 20 iterations
