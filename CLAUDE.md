@@ -43,13 +43,17 @@ docker login registry.ice.ri.se
 
 ### Persistent Data Storage
 
-FineWeb data (~20GB) is stored in a PersistentVolumeClaim to avoid re-downloading:
+FineWeb data (~20GB) and checkpoints are stored in a PersistentVolumeClaim:
 
 - **PVC**: `nanogpt-data` (50Gi, rook-ceph-rbd)
 - **Mount point**: `/data` in training pods
 - **Data location**: `/data/data/fineweb10B/`
+- **Checkpoints**: `/data/checkpoints/{run_id}/`
 
 The PVC is automatically created by `train.sh` if it doesn't exist.
+
+**Current checkpoints on PVC:**
+- `94384ee4.../state_step002000.pt` through `state_step016000.pt` (10x training run)
 
 ### Running Training
 
@@ -82,9 +86,11 @@ cd /workspace/modded-nanogpt && DATA_PATH=/data ./run.sh
 | `ice/build-image.sh` | Build image locally with Docker |
 | `ice/train.sh` | Launch training pods |
 | `ice/nanogpt-data-pvc.yaml` | PVC for persistent FineWeb data |
-| `train_gpt.py` | Main training script (8 GPU) |
+| `train_gpt.py` | Main training script (8 GPU, 1600 steps) |
+| `train_gpt_long.py` | Extended training (16000 steps, checkpoints every 2000) |
 | `train_gpt_single.py` | Single-GPU test version |
 | `run.sh` | Training launcher (8 GPU) |
+| `run_long.sh` | Long training launcher (10x steps) |
 | `run_single_gpu.sh` | Single-GPU launcher |
 
 ## Local Inference (MPS/CPU)
@@ -115,17 +121,26 @@ python inference.py --prompt "Your prompt here" --max_tokens 100 --device mps
 
 ## Training Configuration
 
-Full training (8xH100):
-- 1600 iterations
+### Speedrun (1600 steps)
 - Batch size schedule: 131K → 262K → 393K tokens
 - Target: ≤3.28 validation loss
 - Time: ~100 seconds (ideal), ~220 seconds on ICE
 
-**Achieved results on ICE:**
-- val_loss: **3.2761** ✓ (target: ≤3.28)
-- Training time: 222 seconds (slower due to network vs NVLink)
+**Results:** val_loss **3.2761** ✓ in 222 seconds
 
-Single-GPU test (`train_gpt_single.py`):
-- 20 iterations
-- Reduced batch sizes (1/8th)
+### Extended Training (16000 steps)
+- 10x longer for better perplexity
+- Checkpoints saved every 2000 steps to `/data/checkpoints/`
+- Time: ~37 minutes on 8xH100
+
+**Results:** val_loss **3.2328** in 37 minutes
+
+### Generation Quality
+Despite lower perplexity, models trained on FineWeb produce incoherent text:
+- 84% probability assigned to `<|endoftext|>` (document boundaries)
+- Strong copy mechanisms cause repetition
+- **Solution:** Fine-tune on focused corpus (Shakespeare, instructions)
+
+### Single-GPU test
+- 20 iterations, reduced batch sizes (1/8th)
 - For validation only

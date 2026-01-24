@@ -1,0 +1,7 @@
+{
+  "version": "2.0.0",
+  "next_id": 2,
+  "tasks": [
+    {"id": "T-0001", "status": "READY", "summary": "Fine-tune on Shakespeare for better text generation"}
+  ]
+}
